@@ -1,0 +1,137 @@
+<?xml version="1.0"?>
+<package>
+<job>
+<runtime>
+	<named name="DBUserName" helpstring="Database User Name" type="string" required="false"	/>
+	<named name="DBPassword" helpstring="Database User Password" type="string"	required="false" />
+	<named name="DBName" helpstring="Database Name, defaults if not specified" type="string" required="false" />
+	<named name="DBServer" helpstring="Database  Server Name, (local) if not specified" type="string" required="false"	/>
+	<named name="DBAppUserId" helpstring="Database application user id" type="string" required="false"	/>
+	<description>This script builds your database environment.</description>
+</runtime>		
+			
+<script language="VBScript" src="../../script/Common.vbs" />
+<script language="VBScript">
+<![CDATA[
+    option explicit
+    
+    const CURRENTVERSION = 1     ' current database version
+
+    ' global variables
+    dim pDBName, pDBServer, pDBUserName, pDBPassword, pDBAppUserId
+    
+    call Main()
+    
+    wscript.echo "Done!"
+    wscript.quit
+    
+    sub Main()
+
+        ' parameters and default values
+        pDBName = GetParameter("dbname", "MR")				' default database name
+        pDBServer = GetParameter("dbserver", "(local)")
+        pDBUserName = GetParameter("dbusername", "")
+        pDBPassword = GetParameter("dbpassword", "")
+        pDBAppUserId = GetParameter("dbappuserid", "")
+
+        dim conn
+        call GetConnection(pDBServer, pDBName, pDBUserName, pDBPassword, conn)
+        if conn is nothing then
+            wscript.echo "Unable to connect to database: " + pDBName
+            wscript.quit
+        end if
+        
+        wscript.echo "Updating database " & pDBName
+        call UpdateDatabase(conn, pDBName, "FailedConversion", pDBAppUserId)	' name of a table in the database
+        
+        set conn = nothing
+    end sub
+    
+    sub UpdateDatabase(conn, dbname, tbl, dbappuserid)
+    	conn.BeginTrans()   ' begin transaction, all modifications occur within this transaction
+	'if isOwner(conn) then
+	    if not TableExists(conn, tbl) then
+		    wscript.echo "Creating Schema..."
+		    ExecScript conn, "Schema.sql"
+		    call SetDatabaseVersion(conn, CURRENTVERSION)
+	    else
+		    wscript.echo "Dropping Stored Procedures..."
+		    ExecDrops conn, "Procs.txt"
+
+		    wscript.echo "Dropping Views..."
+		    ExecDrops conn, "Views.txt"
+
+		    wscript.echo  "Dropping Functions..."
+		    ExecDrops conn, "Functions.txt"
+	    end if
+
+	    call ConvertDatabase(conn, dbname)  ' convert database if necessary
+
+	    wscript.echo "Creating Functions..."
+	    ExecScriptsFromFile conn, "Functions.txt"
+
+	    wscript.echo "Creating Views..."
+	    ExecScriptsFromFile conn, "Views.txt"
+
+	    wscript.echo "Creating Stored Procedures..."
+	    ExecScriptsFromFile conn, "Procs.txt"
+	    
+	    if dbappuserid <> "" then
+		    wscript.echo "Ensuring users have access..."
+			ExecDBAccess conn, dbappuserid
+	        wscript.echo "Creating Grant Permissions..."
+	        ExecGrants conn, "grants.txt", dbappuserid
+            ExecProcGrants conn, "procs.txt", dbappuserid
+	    end if
+
+	    call PostConvertDatabase(conn)  ' perform post conversion steps if necessary
+	'else
+	'    wscript.echo "User must me a member of the db_owner role for database: " & dbname
+	'    wscript.quit
+	'end if
+
+	    conn.CommitTrans()
+        conn.Close()
+    end sub
+    
+    sub ConvertDatabase(conn, dbname)
+        dim version            
+        version = GetDatabaseVersion(conn)
+        if version > CURRENTVERSION then
+            wscript.echo "Database version must be less than " & cstr(CURRENTVERSION) & " to proceed.  Database version is: " & cstr(version)
+            conn.RollBackTrans()
+            conn.close()
+            wscript.quit
+        end if
+
+        wscript.echo "Peforming database version updates..."
+        wscript.echo "Existing version: " & version
+        
+        if version < CURRENTVERSION then
+            DatabaseUpdates version, conn
+        end if
+        
+   	    call SetDatabaseVersion(conn, CURRENTVERSION)
+        version = GetDatabaseVersion(conn)
+        wscript.echo "New Version: " + cstr(version)
+    end sub
+    
+    sub DatabaseUpdates(version, conn)
+    	'if version <= 1 then
+	    'wscript.echo "Updating to version 2..."
+	    'ExecScript conn, "Versions\UpdateSchema2.sql"
+        'end if
+    end sub
+    
+    
+    sub PostConvertDatabase(conn)
+    end sub
+    
+    sub ExecScript(byref conn, byval filename)
+        call ExecSQLScript(conn, filename)
+    end sub
+]]>
+</script>
+</job>
+</package>
+

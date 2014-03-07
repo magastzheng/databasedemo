@@ -1,0 +1,5 @@
+#grants
+#grant execute on TABLE to %appuserid%
+# Stored Procedures
+# User-Defined Types
+# sample:   grant execute on TYPE::dbo.TCountryID to %appuserid%
